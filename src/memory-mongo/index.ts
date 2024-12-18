@@ -6,16 +6,17 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { promises as fs } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 
+// API configuration
+const API_KEY = process.env.MEMORY_API_KEY;
+const API_BASE_URL = process.env.MEMORY_API_URL || 'http://localhost:3000';
 
-// Define the path to the JSONL file, you can change this to your desired local path
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MEMORY_FILE_PATH = path.join(__dirname, 'memory.json');
+if (!API_KEY) {
+  throw new Error('MEMORY_API_KEY environment variable is required');
+}
 
-// We are storing our memory using entities, relations, and observations in a graph structure
+// Interfaces for our knowledge graph data structures
 interface Entity {
   name: string;
   entityType: string;
@@ -33,163 +34,133 @@ interface KnowledgeGraph {
   relations: Relation[];
 }
 
-// The KnowledgeGraphManager class contains all operations to interact with the knowledge graph
+// API Response interfaces
+interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+}
+
+interface ApiError {
+  success: false;
+  error: string;
+  details?: Record<string, unknown>;
+}
+
+// The KnowledgeGraphManager class contains all operations to interact with the knowledge graph via the API
 class KnowledgeGraphManager {
-  private async loadGraph(): Promise<KnowledgeGraph> {
-    try {
-      const data = await fs.readFile(MEMORY_FILE_PATH, "utf-8");
-      const lines = data.split("\n").filter(line => line.trim() !== "");
-      return lines.reduce((graph: KnowledgeGraph, line) => {
-        const item = JSON.parse(line);
-        if (item.type === "entity") graph.entities.push(item as Entity);
-        if (item.type === "relation") graph.relations.push(item as Relation);
-        return graph;
-      }, { entities: [], relations: [] });
-    } catch (error) {
-      if (error instanceof Error && 'code' in error && (error as any).code === "ENOENT") {
-        return { entities: [], relations: [] };
+  private api: AxiosInstance;
+
+  constructor() {
+    this.api = axios.create({
+      baseURL: API_BASE_URL,
+      headers: {
+        'Authorization': `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json'
       }
-      throw error;
-    }
+    });
   }
 
-  private async saveGraph(graph: KnowledgeGraph): Promise<void> {
-    const lines = [
-      ...graph.entities.map(e => JSON.stringify({ type: "entity", ...e })),
-      ...graph.relations.map(r => JSON.stringify({ type: "relation", ...r })),
-    ];
-    await fs.writeFile(MEMORY_FILE_PATH, lines.join("\n"));
+  private handleError(error: unknown): never {
+    if (axios.isAxiosError(error)) {
+      const apiError = (error.response?.data || {}) as Partial<ApiError>;
+      throw new Error(apiError?.error || error.message);
+    }
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('An unknown error occurred');
   }
 
   async createEntities(entities: Entity[]): Promise<Entity[]> {
-    const graph = await this.loadGraph();
-    const newEntities = entities.filter(e => !graph.entities.some(existingEntity => existingEntity.name === e.name));
-    graph.entities.push(...newEntities);
-    await this.saveGraph(graph);
-    return newEntities;
+    try {
+      const response = await this.api.post<ApiResponse<{ created: Entity[] }>>('/api/entities', { entities });
+      return response.data.data.created;
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   async createRelations(relations: Relation[]): Promise<Relation[]> {
-    const graph = await this.loadGraph();
-    const newRelations = relations.filter(r => !graph.relations.some(existingRelation => 
-      existingRelation.from === r.from && 
-      existingRelation.to === r.to && 
-      existingRelation.relationType === r.relationType
-    ));
-    graph.relations.push(...newRelations);
-    await this.saveGraph(graph);
-    return newRelations;
+    try {
+      const response = await this.api.post<ApiResponse<{ created: Relation[] }>>('/api/relations', { relations });
+      return response.data.data.created;
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   async addObservations(observations: { entityName: string; contents: string[] }[]): Promise<{ entityName: string; addedObservations: string[] }[]> {
-    const graph = await this.loadGraph();
-    const results = observations.map(o => {
-      const entity = graph.entities.find(e => e.name === o.entityName);
-      if (!entity) {
-        throw new Error(`Entity with name ${o.entityName} not found`);
-      }
-      const newObservations = o.contents.filter(content => !entity.observations.includes(content));
-      entity.observations.push(...newObservations);
-      return { entityName: o.entityName, addedObservations: newObservations };
-    });
-    await this.saveGraph(graph);
-    return results;
+    try {
+      const response = await this.api.post<ApiResponse<{ updates: { entityName: string; addedObservations: string[] }[] }>>('/api/observations', { observations });
+      return response.data.data.updates;
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   async deleteEntities(entityNames: string[]): Promise<void> {
-    const graph = await this.loadGraph();
-    graph.entities = graph.entities.filter(e => !entityNames.includes(e.name));
-    graph.relations = graph.relations.filter(r => !entityNames.includes(r.from) && !entityNames.includes(r.to));
-    await this.saveGraph(graph);
+    try {
+      await this.api.delete<ApiResponse<{ message: string }>>('/api/entities', { data: { entityNames } });
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   async deleteObservations(deletions: { entityName: string; observations: string[] }[]): Promise<void> {
-    const graph = await this.loadGraph();
-    deletions.forEach(d => {
-      const entity = graph.entities.find(e => e.name === d.entityName);
-      if (entity) {
-        entity.observations = entity.observations.filter(o => !d.observations.includes(o));
-      }
-    });
-    await this.saveGraph(graph);
+    try {
+      await this.api.delete<ApiResponse<{ message: string }>>('/api/observations', { data: { deletions } });
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   async deleteRelations(relations: Relation[]): Promise<void> {
-    const graph = await this.loadGraph();
-    graph.relations = graph.relations.filter(r => !relations.some(delRelation => 
-      r.from === delRelation.from && 
-      r.to === delRelation.to && 
-      r.relationType === delRelation.relationType
-    ));
-    await this.saveGraph(graph);
+    try {
+      await this.api.delete<ApiResponse<{ message: string }>>('/api/relations', { data: { relations } });
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   async readGraph(): Promise<KnowledgeGraph> {
-    return this.loadGraph();
+    try {
+      const response = await this.api.get<ApiResponse<KnowledgeGraph>>('/api/graph');
+      return response.data.data;
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
-  // Very basic search function
   async searchNodes(query: string): Promise<KnowledgeGraph> {
-    const graph = await this.loadGraph();
-    
-    // Filter entities
-    const filteredEntities = graph.entities.filter(e => 
-      e.name.toLowerCase().includes(query.toLowerCase()) ||
-      e.entityType.toLowerCase().includes(query.toLowerCase()) ||
-      e.observations.some(o => o.toLowerCase().includes(query.toLowerCase()))
-    );
-  
-    // Create a Set of filtered entity names for quick lookup
-    const filteredEntityNames = new Set(filteredEntities.map(e => e.name));
-  
-    // Filter relations to only include those between filtered entities
-    const filteredRelations = graph.relations.filter(r => 
-      filteredEntityNames.has(r.from) && filteredEntityNames.has(r.to)
-    );
-  
-    const filteredGraph: KnowledgeGraph = {
-      entities: filteredEntities,
-      relations: filteredRelations,
-    };
-  
-    return filteredGraph;
+    try {
+      const response = await this.api.get<ApiResponse<{ graph: KnowledgeGraph }>>(`/api/search?query=${encodeURIComponent(query)}`);
+      return response.data.data.graph;
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   async openNodes(names: string[]): Promise<KnowledgeGraph> {
-    const graph = await this.loadGraph();
-    
-    // Filter entities
-    const filteredEntities = graph.entities.filter(e => names.includes(e.name));
-  
-    // Create a Set of filtered entity names for quick lookup
-    const filteredEntityNames = new Set(filteredEntities.map(e => e.name));
-  
-    // Filter relations to only include those between filtered entities
-    const filteredRelations = graph.relations.filter(r => 
-      filteredEntityNames.has(r.from) && filteredEntityNames.has(r.to)
-    );
-  
-    const filteredGraph: KnowledgeGraph = {
-      entities: filteredEntities,
-      relations: filteredRelations,
-    };
-  
-    return filteredGraph;
+    try {
+      const response = await this.api.post<ApiResponse<{ graph: KnowledgeGraph }>>('/api/nodes', { names });
+      return response.data.data.graph;
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 }
 
 const knowledgeGraphManager = new KnowledgeGraphManager();
 
-
 // The server instance and tools exposed to Claude
 const server = new Server({
-  name: "memory-server",
+  name: "memory-mongo-server",
   version: "1.0.0",
-},    {
-    capabilities: {
-      tools: {},
-    },
-  },);
+}, {
+  capabilities: {
+    tools: {},
+  },
+});
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
@@ -375,40 +346,53 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     throw new Error(`No arguments provided for tool: ${name}`);
   }
 
-  switch (name) {
-    case "create_entities":
-      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.createEntities(args.entities as Entity[]), null, 2) }] };
-    case "create_relations":
-      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.createRelations(args.relations as Relation[]), null, 2) }] };
-    case "add_observations":
-      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.addObservations(args.observations as { entityName: string; contents: string[] }[]), null, 2) }] };
-    case "delete_entities":
-      await knowledgeGraphManager.deleteEntities(args.entityNames as string[]);
-      return { content: [{ type: "text", text: "Entities deleted successfully" }] };
-    case "delete_observations":
-      await knowledgeGraphManager.deleteObservations(args.deletions as { entityName: string; observations: string[] }[]);
-      return { content: [{ type: "text", text: "Observations deleted successfully" }] };
-    case "delete_relations":
-      await knowledgeGraphManager.deleteRelations(args.relations as Relation[]);
-      return { content: [{ type: "text", text: "Relations deleted successfully" }] };
-    case "read_graph":
-      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.readGraph(), null, 2) }] };
-    case "search_nodes":
-      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.searchNodes(args.query as string), null, 2) }] };
-    case "open_nodes":
-      return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.openNodes(args.names as string[]), null, 2) }] };
-    default:
-      throw new Error(`Unknown tool: ${name}`);
+  try {
+    switch (name) {
+      case "create_entities":
+        return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.createEntities(args.entities as Entity[]), null, 2) }] };
+      case "create_relations":
+        return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.createRelations(args.relations as Relation[]), null, 2) }] };
+      case "add_observations":
+        return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.addObservations(args.observations as { entityName: string; contents: string[] }[]), null, 2) }] };
+      case "delete_entities":
+        await knowledgeGraphManager.deleteEntities(args.entityNames as string[]);
+        return { content: [{ type: "text", text: "Entities deleted successfully" }] };
+      case "delete_observations":
+        await knowledgeGraphManager.deleteObservations(args.deletions as { entityName: string; observations: string[] }[]);
+        return { content: [{ type: "text", text: "Observations deleted successfully" }] };
+      case "delete_relations":
+        await knowledgeGraphManager.deleteRelations(args.relations as Relation[]);
+        return { content: [{ type: "text", text: "Relations deleted successfully" }] };
+      case "read_graph":
+        return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.readGraph(), null, 2) }] };
+      case "search_nodes":
+        return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.searchNodes(args.query as string), null, 2) }] };
+      case "open_nodes":
+        return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.openNodes(args.names as string[]), null, 2) }] };
+      default:
+        throw new Error(`Unknown tool: ${name}`);
+    }
+  } catch (error) {
+    if (error instanceof Error) {
+      return { 
+        content: [{ type: "text", text: `Error: ${error.message}` }],
+        isError: true
+      };
+    }
+    return {
+      content: [{ type: "text", text: "An unknown error occurred" }],
+      isError: true
+    };
   }
 });
 
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Knowledge Graph MCP Server running on stdio");
+  console.error("Knowledge Graph MCP Server (MongoDB) running on stdio");
 }
 
 main().catch((error) => {
-  console.error("Fatal error in main():", error);
+  console.error("Fatal error in main():", error instanceof Error ? error.message : "An unknown error occurred");
   process.exit(1);
 });

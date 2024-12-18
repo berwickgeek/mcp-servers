@@ -1,6 +1,6 @@
-# MCP Memory Server with MongoDB
+# Memory MongoDB MCP Server
 
-This repository contains an MCP (Model Context Protocol) server that provides Claude with memory capabilities through a knowledge graph stored in MongoDB. The server uses a REST API for persistence, allowing the memory to be shared and persisted across sessions.
+This MCP server provides Claude with memory capabilities through a knowledge graph stored in MongoDB. It uses a REST API for persistence, allowing the memory to be shared and persisted across sessions.
 
 ## Features
 
@@ -10,18 +10,20 @@ This repository contains an MCP (Model Context Protocol) server that provides Cl
 - Persistent storage through MongoDB
 - Full CRUD operations for entities, relations, and observations
 
-## Installation
-
-```bash
-npm install @berwickgeek/mcp-memory-mongo
-```
-
 ## Configuration
 
 The server requires the following environment variables:
 
 - `MEMORY_API_KEY`: API key for authentication with the MongoDB API
 - `MEMORY_API_URL`: URL of the MongoDB API server (defaults to http://localhost:3000 if not set)
+
+You can set these environment variables in your system or use them when configuring the MCP server in your settings file.
+
+## Installation
+
+```bash
+npm install @modelcontextprotocol/server-memory-mongo
+```
 
 ## Usage in MCP Settings
 
@@ -32,9 +34,7 @@ Add the following to your MCP settings file (e.g., `cline_mcp_settings.json` or 
   "mcpServers": {
     "memory": {
       "command": "node",
-      "args": [
-        "/path/to/node_modules/@berwickgeek/mcp-memory-mongo/dist/index.js"
-      ],
+      "args": ["/path/to/memory-mongo/dist/index.js"],
       "env": {
         "MEMORY_API_KEY": "your_api_key_here",
         "MEMORY_API_URL": "https://memory-api-production.up.railway.app"
@@ -44,22 +44,7 @@ Add the following to your MCP settings file (e.g., `cline_mcp_settings.json` or 
 }
 ```
 
-## Development
-
-```bash
-# Install dependencies
-npm install
-
-# Build all packages
-npm run build
-
-# Watch for changes during development
-npm run watch
-```
-
 ## Available Tools
-
-The server provides the following tools to Claude:
 
 1. `create_entities`: Create new entities in the knowledge graph
 2. `create_relations`: Create relationships between entities
@@ -70,6 +55,19 @@ The server provides the following tools to Claude:
 7. `read_graph`: Retrieve the entire knowledge graph
 8. `search_nodes`: Search for nodes based on a query
 9. `open_nodes`: Retrieve specific nodes by their names
+
+## Development
+
+```bash
+# Install dependencies
+npm install
+
+# Build the server
+npm run build
+
+# Watch for changes during development
+npm run watch
+```
 
 ## License
 
