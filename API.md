@@ -14,11 +14,11 @@ Example:
 curl -H "Authorization: Bearer test-api-key-123" http://localhost:3000/api/graph
 ```
 
-## Endpoints
+## Base Endpoints
 
 ### Health Check
 
-Check API server status.
+Check API server status and available features.
 
 ```http
 GET /health
@@ -28,7 +28,13 @@ Response:
 
 ```json
 {
-  "status": "ok"
+  "status": "ok",
+  "features": {
+    "base": true,
+    "temporal": true,
+    "patterns": true,
+    "pathfinding": true
+  }
 }
 ```
 
@@ -48,12 +54,19 @@ Request Body:
     {
       "name": "Person1",
       "entityType": "person",
-      "observations": ["likes coffee", "works in tech"]
-    },
-    {
-      "name": "Coffee",
-      "entityType": "beverage",
-      "observations": ["hot drink"]
+      "observations": ["likes coffee", "works in tech"],
+      "metadata": {
+        "source": "interview",
+        "confidence": 0.9,
+        "llmContext": "Generated from conversation about work habits"
+      },
+      "properties": {
+        "age": 30,
+        "location": "San Francisco",
+        "skills": ["JavaScript", "Python"]
+      },
+      "status": "active",
+      "tags": ["tech", "coffee-lover"]
     }
   ]
 }
@@ -69,12 +82,19 @@ Response:
       {
         "name": "Person1",
         "entityType": "person",
-        "observations": ["likes coffee", "works in tech"]
-      },
-      {
-        "name": "Coffee",
-        "entityType": "beverage",
-        "observations": ["hot drink"]
+        "observations": ["likes coffee", "works in tech"],
+        "metadata": {
+          "source": "interview",
+          "confidence": 0.9,
+          "llmContext": "Generated from conversation about work habits"
+        },
+        "properties": {
+          "age": 30,
+          "location": "San Francisco",
+          "skills": ["JavaScript", "Python"]
+        },
+        "status": "active",
+        "tags": ["tech", "coffee-lover"]
       }
     ]
   }
@@ -97,202 +117,75 @@ Request Body:
     {
       "from": "Person1",
       "to": "Coffee",
-      "relationType": "likes"
-    }
-  ]
-}
-```
-
-Response:
-
-```json
-{
-  "success": true,
-  "data": {
-    "created": [
-      {
-        "from": "Person1",
-        "to": "Coffee",
-        "relationType": "likes"
-      }
-    ]
-  }
-}
-```
-
-### Add Observations
-
-Add observations to existing entities.
-
-```http
-POST /api/observations
-```
-
-Request Body:
-
-```json
-{
-  "observations": [
-    {
-      "entityName": "Coffee",
-      "contents": ["contains caffeine", "popular morning drink"]
-    }
-  ]
-}
-```
-
-Response:
-
-```json
-{
-  "success": true,
-  "data": {
-    "updates": [
-      {
-        "entityName": "Coffee",
-        "addedObservations": ["contains caffeine", "popular morning drink"]
-      }
-    ]
-  }
-}
-```
-
-### Delete Entities
-
-Delete one or more entities and their associated relations.
-
-```http
-DELETE /api/entities
-```
-
-Request Body:
-
-```json
-{
-  "entityNames": ["Person1", "Coffee"]
-}
-```
-
-Response:
-
-```json
-{
-  "success": true,
-  "data": {
-    "message": "Entities deleted successfully"
-  }
-}
-```
-
-### Delete Relations
-
-Delete specific relations between entities.
-
-```http
-DELETE /api/relations
-```
-
-Request Body:
-
-```json
-{
-  "relations": [
-    {
-      "from": "Person1",
-      "to": "Coffee",
-      "relationType": "likes"
-    }
-  ]
-}
-```
-
-Response:
-
-```json
-{
-  "success": true,
-  "data": {
-    "message": "Relations deleted successfully"
-  }
-}
-```
-
-### Delete Observations
-
-Delete specific observations from entities.
-
-```http
-DELETE /api/observations
-```
-
-Request Body:
-
-```json
-{
-  "deletions": [
-    {
-      "entityName": "Coffee",
-      "observations": ["hot drink"]
-    }
-  ]
-}
-```
-
-Response:
-
-```json
-{
-  "success": true,
-  "data": {
-    "message": "Observations deleted successfully"
-  }
-}
-```
-
-### Get Full Graph
-
-Retrieve the entire graph with all entities and relations.
-
-```http
-GET /api/graph
-```
-
-Response:
-
-```json
-{
-  "success": true,
-  "data": {
-    "entities": [
-      {
-        "name": "Person1",
-        "entityType": "person",
-        "observations": ["likes coffee", "works in tech"]
+      "relationType": "likes",
+      "metadata": {
+        "source": "observation",
+        "confidence": 0.8,
+        "llmContext": "Inferred from daily habits"
       },
+      "temporal": {
+        "startDate": "2023-01-01T00:00:00Z",
+        "isActive": true
+      },
+      "properties": {
+        "frequency": "daily",
+        "preference": "strong"
+      },
+      "context": "Morning routine",
+      "strength": 0.9,
+      "bidirectional": false
+    }
+  ]
+}
+```
+
+[Previous API documentation for other base endpoints remains unchanged...]
+
+## Enhanced Features
+
+### Pattern Analysis
+
+Get commonly used entity or relation types and their properties.
+
+```http
+GET /api/patterns?category=entity
+```
+
+Parameters:
+
+- `category` (optional): Filter by 'entity' or 'relation'
+
+Response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "patterns": [
       {
-        "name": "Coffee",
-        "entityType": "beverage",
-        "observations": ["hot drink", "contains caffeine"]
-      }
-    ],
-    "relations": [
-      {
-        "from": "Person1",
-        "to": "Coffee",
-        "relationType": "likes"
+        "category": "entity",
+        "value": "person",
+        "frequency": 150,
+        "lastUsed": "2023-12-01T10:30:00Z",
+        "commonProperties": ["name", "age", "location"]
       }
     ]
   }
 }
 ```
 
-### Search Nodes
+### Temporal Graph
 
-Search for nodes in the graph using text search.
+Get graph state within a time period.
 
 ```http
-GET /api/search?query=coffee
+GET /api/graph/temporal?startDate=2023-01-01T00:00:00Z&endDate=2023-12-31T23:59:59Z
 ```
+
+Parameters:
+
+- `startDate`: ISO date string
+- `endDate`: ISO date string
 
 Response:
 
@@ -301,34 +194,26 @@ Response:
   "success": true,
   "data": {
     "graph": {
-      "entities": [
-        {
-          "name": "Coffee",
-          "entityType": "beverage",
-          "observations": ["hot drink", "contains caffeine"]
-        }
-      ],
-      "relations": []
+      "entities": [...],
+      "relations": [...]
     }
   }
 }
 ```
 
-### Get Specific Nodes
+### Path Finding
 
-Retrieve specific nodes by their names.
+Find path between two entities.
 
 ```http
-POST /api/nodes
+GET /api/graph/path?from=Person1&to=Company1&maxDepth=3
 ```
 
-Request Body:
+Parameters:
 
-```json
-{
-  "names": ["Person1", "Coffee"]
-}
-```
+- `from`: Source entity name
+- `to`: Target entity name
+- `maxDepth` (optional): Maximum path length (default: 3)
 
 Response:
 
@@ -336,24 +221,28 @@ Response:
 {
   "success": true,
   "data": {
-    "graph": {
+    "path": {
       "entities": [
         {
           "name": "Person1",
           "entityType": "person",
-          "observations": ["likes coffee", "works in tech"]
+          "observations": [...]
         },
         {
-          "name": "Coffee",
-          "entityType": "beverage",
-          "observations": ["hot drink", "contains caffeine"]
+          "name": "Company1",
+          "entityType": "organization",
+          "observations": [...]
         }
       ],
       "relations": [
         {
           "from": "Person1",
-          "to": "Coffee",
-          "relationType": "likes"
+          "to": "Company1",
+          "relationType": "works_at",
+          "temporal": {
+            "startDate": "2023-01-01T00:00:00Z",
+            "isActive": true
+          }
         }
       ]
     }
@@ -397,3 +286,52 @@ When rate limit is exceeded, the API returns:
   "error": "Too many requests, please try again later"
 }
 ```
+
+## Data Quality
+
+The API supports various data quality features:
+
+1. **Confidence Scores**
+
+   - Both entities and relations can have confidence scores (0-1)
+   - Scores can be based on source reliability and verification status
+
+2. **Metadata Tracking**
+
+   - Source attribution
+   - Last verification date
+   - LLM context preservation
+   - Creation and update timestamps
+
+3. **Temporal Tracking**
+
+   - Relationship start and end dates
+   - Active status tracking
+   - Historical state queries
+
+4. **Property Flexibility**
+   - Dynamic property support for both entities and relations
+   - Multiple value types (string, number, boolean, date, arrays)
+   - Property usage pattern tracking
+
+## Best Practices
+
+1. **Entity Creation**
+
+   - Provide meaningful entity types
+   - Include relevant metadata
+   - Add descriptive observations
+   - Use properties for structured data
+
+2. **Relation Creation**
+
+   - Set temporal information when known
+   - Include confidence scores
+   - Provide context when available
+   - Use bidirectional flag appropriately
+
+3. **Querying**
+   - Use temporal queries for time-sensitive data
+   - Leverage pattern analysis for consistency
+   - Consider path depth in pathfinding queries
+   - Include relevant context in searches

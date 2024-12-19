@@ -17,16 +17,38 @@ if (!API_KEY) {
 }
 
 // Interfaces for our knowledge graph data structures
+interface Metadata {
+  source?: string;
+  confidence?: number;
+  llmContext?: string;
+}
+
+interface Temporal {
+  startDate?: string;
+  endDate?: string;
+  isActive?: boolean;
+}
+
 interface Entity {
   name: string;
   entityType: string;
   observations: string[];
+  metadata?: Metadata;
+  properties?: Record<string, unknown>;
+  status?: string;
+  tags?: string[];
 }
 
 interface Relation {
   from: string;
   to: string;
   relationType: string;
+  metadata?: Metadata;
+  temporal?: Temporal;
+  properties?: Record<string, unknown>;
+  context?: string;
+  strength?: number;
+  bidirectional?: boolean;
 }
 
 interface KnowledgeGraph {
@@ -34,16 +56,30 @@ interface KnowledgeGraph {
   relations: Relation[];
 }
 
+interface Pattern {
+  category: 'entity' | 'relation';
+  value: string;
+  frequency: number;
+  lastUsed: string;
+  commonProperties: string[];
+}
+
 // API Response interfaces
 interface ApiResponse<T> {
   success: boolean;
   data: T;
+  error?: string;
+  details?: Record<string, unknown>;
 }
 
-interface ApiError {
-  success: false;
-  error: string;
-  details?: Record<string, unknown>;
+interface HealthResponse {
+  status: string;
+  features: {
+    base: boolean;
+    temporal: boolean;
+    patterns: boolean;
+    pathfinding: boolean;
+  };
 }
 
 // The KnowledgeGraphManager class contains all operations to interact with the knowledge graph via the API
@@ -62,13 +98,22 @@ class KnowledgeGraphManager {
 
   private handleError(error: unknown): never {
     if (axios.isAxiosError(error)) {
-      const apiError = (error.response?.data || {}) as Partial<ApiError>;
+      const apiError = error.response?.data as ApiResponse<never>;
       throw new Error(apiError?.error || error.message);
     }
     if (error instanceof Error) {
       throw error;
     }
     throw new Error('An unknown error occurred');
+  }
+
+  async checkHealth(): Promise<HealthResponse> {
+    try {
+      const response = await this.api.get<ApiResponse<HealthResponse>>('/health');
+      return response.data.data;
+    } catch (error) {
+      this.handleError(error);
+    }
   }
 
   async createEntities(entities: Entity[]): Promise<Entity[]> {
@@ -148,6 +193,39 @@ class KnowledgeGraphManager {
       this.handleError(error);
     }
   }
+
+  async getPatterns(category?: 'entity' | 'relation'): Promise<Pattern[]> {
+    try {
+      const url = category ? `/api/patterns?category=${category}` : '/api/patterns';
+      const response = await this.api.get<ApiResponse<{ patterns: Pattern[] }>>(url);
+      return response.data.data.patterns;
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
+  async getTemporalGraph(startDate: string, endDate: string): Promise<KnowledgeGraph> {
+    try {
+      const response = await this.api.get<ApiResponse<{ graph: KnowledgeGraph }>>(
+        `/api/graph/temporal?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`
+      );
+      return response.data.data.graph;
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
+  async findPath(from: string, to: string, maxDepth?: number): Promise<{ entities: Entity[]; relations: Relation[] }> {
+    try {
+      const url = maxDepth 
+        ? `/api/graph/path?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&maxDepth=${maxDepth}`
+        : `/api/graph/path?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+      const response = await this.api.get<ApiResponse<{ path: { entities: Entity[]; relations: Relation[] } }>>(url);
+      return response.data.data.path;
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
 }
 
 const knowledgeGraphManager = new KnowledgeGraphManager();
@@ -166,6 +244,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
+        name: "check_health",
+        description: "Check the API server status and available features",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
         name: "create_entities",
         description: "Create multiple new entities in the knowledge graph",
         inputSchema: {
@@ -183,6 +269,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     items: { type: "string" },
                     description: "An array of observation contents associated with the entity"
                   },
+                  metadata: {
+                    type: "object",
+                    properties: {
+                      source: { type: "string" },
+                      confidence: { type: "number" },
+                      llmContext: { type: "string" }
+                    }
+                  },
+                  properties: { type: "object" },
+                  status: { type: "string" },
+                  tags: { type: "array", items: { type: "string" } }
                 },
                 required: ["name", "entityType", "observations"],
               },
@@ -193,7 +290,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "create_relations",
-        description: "Create multiple new relations between entities in the knowledge graph. Relations should be in active voice",
+        description: "Create multiple new relations between entities in the knowledge graph",
         inputSchema: {
           type: "object",
           properties: {
@@ -205,6 +302,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                   from: { type: "string", description: "The name of the entity where the relation starts" },
                   to: { type: "string", description: "The name of the entity where the relation ends" },
                   relationType: { type: "string", description: "The type of the relation" },
+                  metadata: {
+                    type: "object",
+                    properties: {
+                      source: { type: "string" },
+                      confidence: { type: "number" },
+                      llmContext: { type: "string" }
+                    }
+                  },
+                  temporal: {
+                    type: "object",
+                    properties: {
+                      startDate: { type: "string" },
+                      endDate: { type: "string" },
+                      isActive: { type: "boolean" }
+                    }
+                  },
+                  properties: { type: "object" },
+                  context: { type: "string" },
+                  strength: { type: "number" },
+                  bidirectional: { type: "boolean" }
                 },
                 required: ["from", "to", "relationType"],
               },
@@ -335,6 +452,55 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["names"],
         },
       },
+      {
+        name: "get_patterns",
+        description: "Get commonly used entity or relation types and their properties",
+        inputSchema: {
+          type: "object",
+          properties: {
+            category: { 
+              type: "string",
+              enum: ["entity", "relation"],
+              description: "Filter patterns by category"
+            },
+          },
+        },
+      },
+      {
+        name: "get_temporal_graph",
+        description: "Get graph state within a time period",
+        inputSchema: {
+          type: "object",
+          properties: {
+            startDate: { 
+              type: "string",
+              description: "Start date in ISO format (e.g. 2023-01-01T00:00:00Z)"
+            },
+            endDate: {
+              type: "string",
+              description: "End date in ISO format (e.g. 2023-12-31T23:59:59Z)"
+            },
+          },
+          required: ["startDate", "endDate"],
+        },
+      },
+      {
+        name: "find_path",
+        description: "Find path between two entities",
+        inputSchema: {
+          type: "object",
+          properties: {
+            from: { type: "string", description: "Source entity name" },
+            to: { type: "string", description: "Target entity name" },
+            maxDepth: { 
+              type: "number",
+              description: "Maximum path length (default: 3)",
+              minimum: 1
+            },
+          },
+          required: ["from", "to"],
+        },
+      },
     ],
   };
 });
@@ -348,6 +514,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     switch (name) {
+      case "check_health":
+        return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.checkHealth(), null, 2) }] };
       case "create_entities":
         return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.createEntities(args.entities as Entity[]), null, 2) }] };
       case "create_relations":
@@ -369,6 +537,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.searchNodes(args.query as string), null, 2) }] };
       case "open_nodes":
         return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.openNodes(args.names as string[]), null, 2) }] };
+      case "get_patterns":
+        return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.getPatterns(args.category as 'entity' | 'relation'), null, 2) }] };
+      case "get_temporal_graph":
+        return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.getTemporalGraph(args.startDate as string, args.endDate as string), null, 2) }] };
+      case "find_path":
+        return { content: [{ type: "text", text: JSON.stringify(await knowledgeGraphManager.findPath(args.from as string, args.to as string, args.maxDepth as number), null, 2) }] };
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
